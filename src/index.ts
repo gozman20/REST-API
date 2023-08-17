@@ -1,15 +1,20 @@
-import { Prisma, PrismaClient } from "@prisma/client";
+import prisma from "../lib/prisma";
 import express from "express";
+import * as debug from "./debug";
+import * as promise from "./promise-fs";
+import { Post } from "@prisma/client";
+import * as user from "./user";
+console.log(promise);
+console.log(debug);
 
-const prisma = new PrismaClient();
 const app = express();
 
 app.use(express.json());
-
+app.use(express.urlencoded({ extended: false }));
 app.post(`/signup`, async (req, res) => {
   const { name, email, posts } = req.body;
 
-  const postData = posts?.map((post: Prisma.PostCreateInput) => {
+  const postData = posts?.map((post: Post) => {
     return { title: post?.title, content: post?.content };
   });
 
@@ -20,6 +25,9 @@ app.post(`/signup`, async (req, res) => {
       posts: {
         create: postData,
       },
+    },
+    include: {
+      posts: true, //   includes all post in the returned obj
     },
   });
   res.json(result);
@@ -56,6 +64,20 @@ app.put("/post/:id/views", async (req, res) => {
   }
 });
 
+//i added this
+//this returns posts with published authors
+app.get("/published", async (req, res) => {
+  const publishedAuthors = await prisma.user.findMany({
+    include: {
+      posts: {
+        where: {
+          published: true,
+        },
+      },
+    },
+  });
+  res.json(publishedAuthors);
+});
 app.put("/publish/:id", async (req, res) => {
   const { id } = req.params;
 
@@ -77,11 +99,30 @@ app.put("/publish/:id", async (req, res) => {
   }
 });
 
+//update user info
+app.put("/user/:id", async (req, res) => {
+  const { id } = req.params;
+  const { email } = req.body;
+  const user = await prisma.user.update({
+    where: {
+      id: +id,
+    },
+    data: {
+      email: email,
+    },
+    include: {
+      posts: true,
+    },
+  });
+
+  res.json(user);
+});
+
 app.delete(`/post/:id`, async (req, res) => {
   const { id } = req.params;
   const post = await prisma.post.delete({
     where: {
-      id: Number(id),
+      id: +id,
     },
   });
   res.json(post);
@@ -98,7 +139,7 @@ app.get("/user/:id/drafts", async (req, res) => {
   const drafts = await prisma.user
     .findUnique({
       where: {
-        id: Number(id),
+        id: +id,
       },
     })
     .posts({
@@ -108,12 +149,26 @@ app.get("/user/:id/drafts", async (req, res) => {
   res.json(drafts);
 });
 
+// i added this
+app.get("/post", async (req, res) => {
+  const post = await prisma.post.findMany({
+    where: {
+      NOT: {
+        createdAt: {
+          gte: new Date("2023-07-24"),
+          lte: new Date("2023-07-28"),
+        },
+      },
+    },
+  });
+  res.json(post);
+});
 //returns post with a specific id
 app.get(`/post/:id`, async (req, res) => {
   const { id }: { id?: string } = req.params;
 
   const post = await prisma.post.findUnique({
-    where: { id: Number(id) },
+    where: { id: +id },
   });
   res.json(post);
 });
@@ -124,7 +179,7 @@ app.get(`/userpost/:id`, async (req, res) => {
   const { id }: { id?: string } = req.params;
 
   const post = await prisma.post.findMany({
-    where: { author: { id: Number(id) } },
+    where: { author: { id: +id } },
   });
   res.json(post);
 });
@@ -132,7 +187,7 @@ app.get(`/userpost/:id`, async (req, res) => {
 app.get("/feed", async (req, res) => {
   const { searchString, skip, take, orderBy } = req.query;
 
-  const or: Prisma.PostWhereInput = searchString
+  const or = searchString
     ? {
         OR: [
           { title: { contains: searchString as string } },
@@ -150,7 +205,7 @@ app.get("/feed", async (req, res) => {
     take: Number(take) || undefined,
     skip: Number(skip) || undefined,
     orderBy: {
-      updatedAt: orderBy as Prisma.SortOrder,
+      updatedAt: "desc",
     },
   });
 
